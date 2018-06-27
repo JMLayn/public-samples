@@ -1,3 +1,7 @@
+Format:
+```bash
+s3://BUCKET_NAME/starter_kit.zip
+```
 
 ```bash
 wget https://s3.amazonaws.com/aws-partner-devops-bucket/example_cookbook.zip
