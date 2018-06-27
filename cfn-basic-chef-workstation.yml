@@ -19,6 +19,10 @@ Parameters:
     Type: AWS::EC2::Subnet::Id
     Description: 'Subnet to deploy EC2 instance into'
 
+  VpcID:
+    Type: AWS::EC2::VPC::Id
+    Description: 'Select the VPC to use'
+
   # KeyName - required to create instances
   KeyName:
     Type: AWS::EC2::KeyPair::KeyName
@@ -69,6 +73,7 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: 'Allow SSH, HTTP, and HTTPS access to the instance'
+      VpcId: !Ref VpcID
       SecurityGroupIngress:
         - FromPort: 22
           ToPort: 22
@@ -108,9 +113,9 @@ Resources:
       ImageId: ami-a4dc46db
       InstanceType: t2.micro
       KeyName: !Ref KeyName
-      SubnetId: !Ref SubnetID
       SecurityGroupIds: 
         - !Ref ChefWorkstationSG
+      SubnetId: !Ref SubnetID
       IamInstanceProfile: !Ref ChefWorkstationProfile
       UserData:
         Fn::Base64: !Sub |
@@ -144,7 +149,7 @@ Resources:
           Key: Environment
           Value: CFNTest
 
-Outputs:
-  PublicIP:
-    Description: Public IP Address of the instance
-    Value: !GetAtt ChefWorkstation.PublicIp
+#Outputs:
+#  PublicIP:
+#    Description: Public IP Address of the instance
+#    Value: !GetAtt ChefWorkstation.PublicIp
