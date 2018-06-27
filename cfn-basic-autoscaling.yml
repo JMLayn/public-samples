@@ -1,0 +1,94 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: DevDay - Simple AutoScaling
+Parameters:
+  VPC:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC to create your resources in
+  SubnetID:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnet to deploy EC2 instance into
+  SecurityGroupIDs:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+    Description: List of Security Groups to add to EC2 instance
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
+  InstanceType:
+    Description: EC2 instance type
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+    - t2.micro
+    - t2.small
+    - t2.medium
+    - t2.large
+    - m4.large
+    - m5.large
+Resources:
+  DevDayASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier: !Ref SubnetID
+      LaunchConfigurationName: !Ref DevDayLaunchConfig
+      MinSize: 1
+      MaxSize: 3
+      DesiredCapacity: 1
+      TargetGroupARNs:
+      - !Ref DevDayTargetGroup
+      Tags:
+      - Key: Name
+        Value: DevDay
+        PropagateAtLaunch: true
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: 1
+        MaxBatchSize: 1
+        WaitOnResourceSignals: false
+  DevDayLaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      AssociatePublicIpAddress: true
+      ImageId: ami-14c5486b
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      SecurityGroups: !Ref SecurityGroupIDs
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -ex
+          yum install -y httpd;
+          echo "<html>My first CloudFormation template!</html>" > /var/www/html/index.html;
+          cd /var/www/html;
+          chmod 755 index.html;
+          service httpd start;
+          chkconfig httpd on;
+  DevDayALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: DevDayALB
+      Subnets: !Ref SubnetID
+      SecurityGroups: !Ref SecurityGroupIDs
+  DevDayALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      Port: 80
+      Protocol: HTTP
+      LoadBalancerArn: !Ref DevDayALB
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref DevDayTargetGroup
+  DevDayTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: DevDayTest-default
+      VpcId: !Ref VPC
+      Port: 80
+      Protocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 25
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 5
+      Tags:
+      - Key: Name
+        Value: DevDayTargetGroup
+...
