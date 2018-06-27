@@ -1,0 +1,301 @@
+# 
+# Basic build pipeline for Chef cookbooks
+# 
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: AWS OpsWorks Chef Automate Cookbook Continous Integration Pipeline
+
+# 
+# Parameters
+# 
+Parameters:
+  # 
+  # We'll need to use the starter kit to interact with the Chef server
+  # 
+  PathToStarterKit:
+    Type: String
+    Description: 'Enter the S3 path where the starter kit is located. ex: s3://opsworks-cm-demo-bucket/chef-demo_starter_kit.zip'
+    MinLength: 10
+
+# 
+# Resources
+# 
+Resources:
+  # CookbookRepository
+  # ------------------
+  # This is the repository for our cookbook(s)
+  CookbookRepository:
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      RepositoryDescription: 'Chef cookbook repository'
+      RepositoryName: 'aws_ow_cm_test_cookbook'
+
+  # PipelineArtifactStoreBucket
+  # ---------------------------
+  # We'll use S3 to store our artifacts
+  PipelineArtifactStoreBucket:
+    Type: AWS::S3::Bucket
+
+  # CodePipelineRole
+  # ----------------
+  # IAM Role for using CodePipeline
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: ''
+            Effect: 'Allow'
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodePipelineChefDemo
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Action: 
+                  - 's3:GetObject'
+                  - 's3:GetObjectVersion'
+                  - 's3:GetBucketVersioning'
+                Resource: '*'
+                Effect: Allow
+                #--------------------
+              - Action:
+                  - 's3:PutObject'
+                Resource:
+                  - 'arn:aws:s3:::codepipeline*'
+                  - 'arn:aws:s3:::elasticbeanstalk*'
+                Effect: Allow
+                #--------------------
+              - Action:
+                  - 'ec2:*'
+                  - 'cloudwatch:*'
+                  - 's3:*'
+                  - 'sns:*'
+                  - 'cloudformation:*'
+                  - 'iam:PassRole'
+                Resource: '*'
+                Effect: Allow
+                #--------------------
+              - Action:
+                  - 'codebuild:BatchGetBuilds'
+                  - 'codebuild:StartBuild'
+                Resource: '*'
+                Effect: Allow
+                #--------------------
+              - Action:
+                  - 'codedeploy:CreateDeployment'
+                  - 'codedeploy:GetApplicationRevision'
+                  - 'codedeploy:GetDeployment'
+                  - 'codedeploy:GetDeploymentConfig'
+                  - 'codedeploy:RegisterApplicationRevision'
+                Resource: '*'
+                Effect: Allow
+                #--------------------
+              - Action:
+                  - 'codecommit:CancelUploadArchive'
+                  - 'codecommit:GetBranch'
+                  - 'codecommit:GetCommit'
+                  - 'codecommit:GetUploadArchiveStatus'
+                  - 'codecommit:UploadArchive'
+                Resource: '*'
+                Effect: Allow
+                #--------------------
+              - Action:
+                  - 'lambda:invokefunction'
+                  - 'lambda:listfunctions'
+                Resource: '*'
+                Effect: Allow
+
+  # CodeBuildRole
+  # -------------
+  # IAM role for using CodeBuild
+  CodeBuildRole:
+    Type: 'AWS::IAM::Role'
+    Properties: 
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: 
+                - 'codebuild.amazonaws.com'
+            Action: 
+              - 'sts:AssumeRole'
+      Path: '/'
+      Policies:
+        - PolicyName: CodePipelineChefDemo
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Action:
+                  - 'ec2:*'
+                  - 'cloudwatch:*'
+                  - 'logs:*'
+                  - 'sns:*'
+                  - 's3:CreateBucket'
+                  - 's3:GetObject'
+                  - 's3:List*'
+                  - 's3:PutObject'
+                Resource: '*'
+                Effect: Allow
+
+  # CodeBuildProject
+  # ----------------
+  # CodeBuild project for testing our cookbook. This uses 
+  # the chef/chefdf image available in the public Docker repo.
+  CodeBuildProject:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Artifacts:
+        Type: 'CODEPIPELINE'
+      Description: 'AWS CodeBuild Project for Chef cookbook testing'
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: 'chef/chefdk'
+      Name: 'Chef-Cookbook-Testing'
+      ServiceRole: !Ref CodeBuildRole
+      Source:
+        Type: CODEPIPELINE
+      TimeoutInMinutes: 10
+
+  # CodeBuildProjectUpload
+  # ----------------------
+  # CodeBuild project for uploading the cookbook to our
+  # Chef Automate server
+  CodeBuildProjectUpload:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Artifacts:
+        Type: 'CODEPIPELINE'
+      Description: 'AWS CodeBuild Project for Chef cookbook upload'
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: 'chef/chefdk'
+        EnvironmentVariables:
+          - Name: 'PATHTOSTARTERKIT'
+            Value: !Ref PathToStarterKit
+      Name: 'Chef-Cookbook-Upload'
+      ServiceRole: !Ref CodeBuildRole
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: 'buildspec-upload.yml'
+      TimeoutInMinutes: 10
+
+  # CookbookTestingPipeline
+  # -----------------------
+  # CodePipline created to pull the commit/build/deploy steps 
+  # together. This is a 4-step process.
+  # 
+  #   1) On commit to master, kick off pipeline process
+  #   2) Test the cookbook 
+  #   3) Stop process and Wait for approval
+  #   4) Upload cookbook to Chef server
+  # 
+  CookbookTestingPipeline:
+    Type: 'AWS::CodePipeline::Pipeline'
+    Properties:
+      Name: CookbookTestingPipeline
+      ArtifactStore:
+        Type: S3
+        Location: !Ref PipelineArtifactStoreBucket
+      RestartExecutionOnUpdate: false
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      Stages:
+        # 
+        # 1) Poll master repo for changes
+        # 
+        - Name: Source
+          Actions:
+            - InputArtifacts: []
+              Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: 1
+                Provider: CodeCommit
+              OutputArtifacts:
+                - Name: MyApp
+              Configuration:
+                RepositoryName: !GetAtt CookbookRepository.Name
+                BranchName: master
+                PollForSourceChanges: true
+              RunOrder: 1
+        # 
+        # 2) Test the cookbook
+        # 
+        - Name: CodeBuildTest
+          Actions:
+            - InputArtifacts:
+                - Name: MyApp
+              Name: CodeBuildTest
+              ActionTypeId:
+                Category: Test
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              OutputArtifacts: []
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+              RunOrder: 2
+        # 
+        # 3) Wait for approval before uploading to Chef server
+        # 
+        - Name: ApproveUpload
+          Actions:
+            - InputArtifacts: []
+              Name: ApproveUpload
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Version: 1
+                Provider: Manual
+              OutputArtifacts: []
+              RunOrder: 3
+        # 
+        # 4) Upload to Chef server after approved
+        # 
+        - Name: CodeBuildUpload
+          Actions:
+            - InputArtifacts:
+                - Name: MyApp
+              Name: CodeBuildUpload
+              ActionTypeId:
+                Category: Test
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              OutputArtifacts: []
+              Configuration:
+                ProjectName: !Ref CodeBuildProjectUpload
+              RunOrder: 4
+
+# 
+# Outputs
+# 
+Outputs:
+  CookbookRepository:
+    Description: 'CloneURL of CodeCommit Cookbook Repository'
+    Value: !GetAtt CookbookRepository.CloneUrlHttp
+  PipelineArtifactStoreBucket:
+    Description: 'Pipeline Bucket Domain Name'
+    Value: !GetAtt PipelineArtifactStoreBucket.DomainName
+  CodePipelineRole:
+    Description: 'CodePipeline IAM Role'
+    Value: !GetAtt CodePipelineRole.Arn
+  CodeBuildRole:
+    Description: 'CodeBuild IAM Role'
+    Value: !GetAtt CodeBuildRole.Arn
+  CodeBuildProject:
+    Description: 'CodeBuild Project Arn'
+    Value: !GetAtt CodeBuildProject.Arn
+  CodeBuildProjectUpload:
+    Description: 'ARN of Codebuild Project for Cookbook Upload'
+    Value: !GetAtt CodeBuildProjectUpload.Arn
+  CookbookTestingPipeline:
+    Description: 'CodePipeline ARN'
+    Value: !Ref CookbookTestingPipeline
