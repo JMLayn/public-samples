@@ -14,6 +14,11 @@ Parameters:
     Description: 'Enter the S3 path where the starter kit is located. ex: s3://opsworks-cm-demo-bucket/chef-demo_starter_kit.zip'
     MinLength: 10
 
+  # SubnetID - Select the subnets the resources will use
+  SubnetID:
+    Type: AWS::EC2::Subnet::Id
+    Description: 'Subnet to deploy EC2 instance into'
+
   # KeyName - required to create instances
   KeyName:
     Type: AWS::EC2::KeyPair::KeyName
@@ -103,6 +108,7 @@ Resources:
       ImageId: ami-a4dc46db
       InstanceType: t2.micro
       KeyName: !Ref KeyName
+      SubnetId: !Ref SubnetID
       SecurityGroupIds: 
         - !Ref ChefWorkstationSG
       IamInstanceProfile: !Ref ChefWorkstationProfile

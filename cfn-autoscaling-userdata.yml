@@ -136,7 +136,7 @@ Resources:
     Type: 'AWS::AutoScaling::LaunchConfiguration'
     Properties:
       AssociatePublicIpAddress: 'true'
-      ImageId: 'ami-ca0135b3'
+      ImageId: 'ami-14c5486b'
       SecurityGroups:
         - !Ref SG
       KeyName: !Ref Key
